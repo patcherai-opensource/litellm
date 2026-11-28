@@ -415,7 +415,7 @@ def test_owned_process_ignores_ambient_dotenv_unless_its_contract_opts_in(
         env=dict(environment),
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=case_timeout_seconds(),
         check=True,
     )
     assert result.stdout.strip() == ("ambient-config" if explicit_dotenv else "absent")
@@ -867,7 +867,7 @@ def test_invalid_native_selections_fail_before_any_case_runs(
             },
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=case_timeout_seconds(),
             check=False,
         )
         assert result.returncode == exit_code, result.stdout + result.stderr

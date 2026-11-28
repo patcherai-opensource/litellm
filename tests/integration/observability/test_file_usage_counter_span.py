@@ -75,7 +75,7 @@ def test_a_counted_upload_exports_its_counter_increment_as_a_rate_limits_span(
             assert _traced_upload(candidate, batch_file(mark, 1), trace_id) == 200
             trace: Final = eventually(
                 lambda: spans_for_trace(recorded_spans(audit_sinks.operator, since)[1], trace_id),
-                lambda spans: COUNTER_SPAN in _names(spans),
+                lambda spans: COUNTER_SPAN in _names(spans) and any(span["kind"] == SERVER for span in spans),
                 seconds=40,
             )
             assert _names(trace).count(COUNTER_SPAN) == 1, _names(trace)

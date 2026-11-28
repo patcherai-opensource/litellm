@@ -6,3 +6,8 @@
 /.github/workflows/zizmor.yml @yuneng-berri
 /litellm/proxy/spend_tracking/legacy_spend_counters.py @narmstrong-berri
 /litellm/proxy/spend_tracking/legacy_spend_log_rows.py @narmstrong-berri
+/litellm/deploy/docker/Dockerfile.fips @yuneng-berri @yucheng-berri @yassin-berriai @ojensen-berri
+/litellm/deploy/docker/Dockerfile.fips.dockerignore @yuneng-berri @yucheng-berri @yassin-berriai @ojensen-berri
+/litellm/deploy/docker/fips_elf_inventory.txt @yuneng-berri @yucheng-berri @yassin-berriai @ojensen-berri
+/litellm/deploy/docker/scan_bundled_crypto.sh @yuneng-berri @yucheng-berri @yassin-berriai @ojensen-berri
+/.github/workflows/fips-scan.yml @yuneng-berri @yucheng-berri @yassin-berriai @ojensen-berri

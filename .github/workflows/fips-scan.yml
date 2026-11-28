@@ -1,0 +1,116 @@
+name: FIPS Scan
+
+on:
+  pull_request:
+    branches:
+      - main
+      - "litellm_**"
+      - "rc/**"
+      - "stable/**"
+      - "lts/**"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: fips scan plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.changes.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Detect dependency and FIPS image changes
+        id: changes
+        run: |
+          set -euo pipefail
+          if ! base="$(git rev-parse --verify --quiet HEAD^2 >/dev/null && git rev-parse HEAD^1)"; then
+            echo "Not a pull request merge commit, running the full scan."
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base" HEAD | grep -Eq '^(uv\.lock|pyproject\.toml|litellm/(enterprise|proxy-extras|packaging/litellm-proxy)/pyproject\.toml|litellm/deploy/docker/(Dockerfile\.fips|Dockerfile\.fips\.dockerignore|fips_elf_inventory\.txt|scan_bundled_crypto\.sh)|\.github/workflows/fips-scan\.yml)$'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No dependency or FIPS image changes in this pull request, nothing to scan."
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  scan:
+    name: fips scan
+    needs: plan
+    if: needs.plan.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: ghcr.io/astral-sh/uv:0.11.7-python3.13-trixie-slim@sha256:74ee1af27961f5fe73f70146808097ea11e03464cecaac33e60e173dc62e9202
+    env:
+      DOCKERFILE: litellm/deploy/docker/Dockerfile.fips
+      UV_PROJECT_ENVIRONMENT: /app/.venv
+      UV_LINK_MODE: copy
+      UV_PYTHON_DOWNLOADS: "0"
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Install the build toolchain
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends binutils gcc g++ libc6-dev
+
+      - name: Install the FIPS image's Python dependencies
+        run: |
+          set -eu
+          venv="$(sed -n 's/^RUN \(uv venv .*\)$/\1/p' "$DOCKERFILE")"
+          sync="$(sed -n '/^RUN uv sync --frozen --no-install-project /,/[^\\]$/p' "$DOCKERFILE" | sed '1s/^RUN //')"
+          if [ -z "$venv" ] || [ -z "$sync" ]; then
+            echo "Could not find the uv venv and first uv sync commands in $DOCKERFILE"
+            exit 1
+          fi
+          printf '%s\n%s\n' "$venv" "$sync"
+          sh -ec "$venv"
+          sh -ec "$sync"
+
+      - name: Scan the native binaries
+        id: scan
+        run: sh litellm/deploy/docker/scan_bundled_crypto.sh /app/.venv
+
+      - name: List the binaries missing from the inventory
+        if: failure() && steps.scan.outcome == 'failure'
+        run: |
+          echo "Review each binary below. If it bundles no crypto, add its line to litellm/deploy/docker/fips_elf_inventory.txt"
+          SCAN_EMIT_INVENTORY=1 sh litellm/deploy/docker/scan_bundled_crypto.sh /app/.venv \
+            | grep -Fxv -f litellm/deploy/docker/fips_elf_inventory.txt || true
+
+  passed:
+    name: fips scan passed
+    needs: [plan, scan]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require the scan to pass, or to be skipped because nothing relevant changed
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RELEVANT: ${{ needs.plan.outputs.relevant }}
+          SCAN_RESULT: ${{ needs.scan.result }}
+        run: |
+          echo "plan: $PLAN_RESULT, relevant: $RELEVANT, scan: $SCAN_RESULT"
+          test "$PLAN_RESULT" = success
+          if [ "$RELEVANT" = true ]; then
+            test "$SCAN_RESULT" = success
+          else
+            test "$SCAN_RESULT" = skipped
+          fi
